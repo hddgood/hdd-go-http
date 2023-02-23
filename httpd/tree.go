@@ -15,31 +15,31 @@ func (t *MethodTree) getHandler(r *Request) (HandlerFunc, bool) {
 
 	cur := t.root
 	for i, part := range parts {
+		// 如果儿子节点是*通配符 就直接返回
+		if cur.isCatchAll {
+			sb := strings.Builder{}
+			for _, p := range parts[i:] {
+				sb.WriteString("/")
+				sb.WriteString(p)
+			}
+			r.queryString[cur.children[0].path[1:]] = sb.String()
+			return cur.children[0].handler, true
+		}
+
 		var tmp *Node
 		for _, node := range cur.children {
-			// 如果是*通配符 就直接返回
-			if node.isCatchAll {
-				sb := strings.Builder{}
-				for _, p := range parts[i:] {
-					sb.WriteString("/")
-					sb.WriteString(p)
-				}
-				r.queryString[node.path[1:]] = sb.String()
-				return node.handler, true
-			}
-
 			if node.path == part {
 				tmp = node
 				break
 			}
 
-			if node.wildChild {
+			if node.nType == param {
 				tmp = node
 			}
 		}
 		cur = tmp
-		if tmp.wildChild {
-			r.queryString[tmp.path[1:]] = part
+		if cur.nType == param {
+			r.queryString[cur.path[1:]] = part
 		}
 
 		if cur == nil {
@@ -52,11 +52,11 @@ func (t *MethodTree) getHandler(r *Request) (HandlerFunc, bool) {
 
 type Node struct {
 	path       string      // 当前节点的路径
-	wildChild  bool        //当前节点是否为参数节点
+	wildChild  bool        //当前节点的孩子节点是否有参数节点
 	handler    HandlerFunc //处理当前节点的函数
 	children   []*Node     //孩子节点
 	nType      nodeType    //当前节点类型
-	isCatchAll bool        //是否为*节点
+	isCatchAll bool        //当前节点的孩子节点是否为*节点
 	fullPath   string      //当前的全部路径
 }
 
@@ -84,11 +84,7 @@ func (n *Node) addPath(path string, handler HandlerFunc) {
 
 	cur := n
 	for i, part := range parts {
-		//assert1(len(cur.children) > 0 && part[0] == '*', fmt.Sprintf("catch-all conflicts with existing handle for the path segment root in path /%s", path))
-		//assert1(len(part) > 1 && part[0] == ':', fmt.Sprintf("wildcards must be named with a non-empty name in path /%s", path))
-		//assert1(len(part) > 1 && part[0] == '*', fmt.Sprintf("wildcards must be named with a non-empty name in path /%s", path))
-
-		if len(cur.children) > 0 && part[0] == '*' {
+		if cur.isCatchAll && part[0] == '*' {
 			panic(fmt.Sprintf("catch-all conflicts with existing handle for the path segment root in path /%s", path))
 		}
 
@@ -107,6 +103,9 @@ func (n *Node) addPath(path string, handler HandlerFunc) {
 		if node, ok := matchPart(cur.children, part); ok {
 			cur = node
 		} else {
+			if cur.wildChild && part[0] == ':' {
+				panic(fmt.Sprintf(" %s in new path /%s conflicts", part, path))
+			}
 			insertNode(cur, parts[i:], handler)
 			return
 		}
@@ -120,11 +119,10 @@ func insertNode(cur *Node, parts []string, handler HandlerFunc) {
 		newNode := new(Node)
 		newNode.nType = static
 		if part[0] == ':' {
-			newNode.wildChild = true
+			cur.wildChild = true
 			newNode.nType = param
 		} else if part[0] == '*' {
-
-			newNode.isCatchAll = true
+			cur.isCatchAll = true
 			newNode.nType = catchAll
 			newNode.fullPath = cur.fullPath + part
 			newNode.path = part
@@ -151,15 +149,7 @@ func insertNode(cur *Node, parts []string, handler HandlerFunc) {
 // 不能有catchAll类型还有其他类型的
 func matchPart(children []*Node, part string) (*Node, bool) {
 	var n *Node
-	wildChild := part[0] == ':'
 	for _, node := range children {
-		if node.isCatchAll {
-			panic("catch-all conflicts with existing handle for the path segment root in path " + node.fullPath)
-		}
-		if wildChild && node.wildChild {
-			panic("catch-all conflicts with existing handle for the path segment root in path " + node.fullPath)
-		}
-
 		if node.path == part {
 			n = node
 			return n, true

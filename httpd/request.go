@@ -207,8 +207,8 @@ func (r *Request) parseCookies() {
 }
 
 func (r *Request) setupBody() {
-	if r.Method != "POST" && r.Method != "PUT" {
-		r.Body = &eofReader{} //POST和PUT以外的方法不允许设置报文主体
+	if r.Method != "POST" && r.Method != "PUT" && r.Method != "GET" {
+		r.Body = &eofReader{} //POST和PUT和GET以外的方法不允许设置报文主体
 	} else if cl := r.Header.Get("Content-Length"); cl != "" {
 		//如果设置了Content-Length
 		contentLength, err := strconv.ParseInt(cl, 10, 64)
@@ -269,6 +269,7 @@ func (r *Request) fixExpectContinueReader() {
 // 防止处理此次请求并未读取报文主体的情况
 // 对响应做一些处理
 func (r *Request) finishRequest(resp *response) (err error) {
+
 	// 删除所有在磁盘上的临时文件
 	if r.multipartForm != nil {
 		r.multipartForm.RemoveAll()
@@ -375,7 +376,7 @@ func (r *Request) MultipartForm() (*MultipartForm, error) {
 
 // 解析表单操作
 func (r *Request) parseForm() error {
-	if r.Method != "POST" && r.Method != "PUT" {
+	if r.Method != "POST" && r.Method != "PUT" && r.Method != "GET" {
 		return errors.New("missing form body")
 	}
 	r.haveParsedForm = true
