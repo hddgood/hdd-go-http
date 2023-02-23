@@ -1,6 +1,9 @@
 package httpd
 
-import "net"
+import (
+	"log"
+	"net"
+)
 
 // 处理器
 type Handler interface {
@@ -9,44 +12,97 @@ type Handler interface {
 
 type HandlerFunc func(ResponseWriter, *Request)
 
-type ServeMux struct {
-	m map[string]HandlerFunc //利用map存取路由
+type Engine struct {
+	trees []MethodTree
 }
 
-func NewServeMux() *ServeMux {
-	return &ServeMux{
-		m: make(map[string]HandlerFunc),
+func New() *Engine {
+	e := &Engine{
+		trees: make([]MethodTree, 0, 9),
 	}
+	return e
 }
 
-func (sm *ServeMux) HandleFunc(pattern string, cb HandlerFunc) {
-	if sm.m == nil {
-		sm.m = make(map[string]HandlerFunc)
+// 添加路由
+func (e *Engine) HandlerFunc(method string, path string, handler HandlerFunc) {
+	// 错误判断
+	assert1(path[0] == '/', "path must begin with '/'")
+	assert1(method != "", "HTTP method can not be empty")
+
+	tree := e.get(method)
+	if tree == nil {
+		tree = new(MethodTree)
+		tree.method = method
+		tree.root = newRoot()
+		e.trees = append(e.trees, *tree)
 	}
-	sm.m[pattern] = cb
+	tree.root.addPath(path[1:], handler)
 }
 
-func (sm *ServeMux) Handle(pattern string, handler Handler) {
-	if sm.m == nil {
-		sm.m = make(map[string]HandlerFunc)
-	}
-	sm.m[pattern] = handler.ServeHttp
-}
-
-func (sm *ServeMux) ServeHttp(w ResponseWriter, r *Request) {
-	// 查看路由表项是否存在对应entry
-	handler, ok := sm.m[r.URL.Path]
-	if !ok {
-		if len(r.URL.Path) > 1 && r.URL.Path[len(r.URL.Path)-1] == '/' {
-			handler, ok = sm.m[r.URL.Path[:len(r.URL.Path)-1]]
-		}
-		if !ok {
-			w.WriteHeader(StatusNotFound)
-			return
+func (e Engine) get(method string) *MethodTree {
+	for _, v := range e.trees {
+		if v.method == method {
+			return &v
 		}
 	}
-	handler(w, r)
+	return nil
 }
+
+func (e *Engine) ServeHttp(w ResponseWriter, r *Request) {
+	// 检查路由书树中是否有对应路由
+	method := r.Method
+	mt := e.get(method)
+	if mt == nil {
+		log.Println("method not fount")
+		w.WriteHeader(StatusNotFound)
+		return
+	}
+	handler, ok := mt.getHandler(r)
+	if ok {
+		handler(w, r)
+	} else {
+		w.WriteHeader(StatusNotFound)
+	}
+}
+
+//type ServeMux struct {
+//	m map[string]HandlerFunc //利用map存取路由
+//}
+//
+//func NewServeMux() *ServeMux {
+//	return &ServeMux{
+//		m: make(map[string]HandlerFunc),
+//	}
+//}
+//
+//func (sm *ServeMux) HandleFunc(pattern string, cb HandlerFunc) {
+//	if sm.m == nil {
+//		sm.m = make(map[string]HandlerFunc)
+//	}
+//	sm.m[pattern] = cb
+//}
+//
+//func (sm *ServeMux) Handle(pattern string, handler Handler) {
+//	if sm.m == nil {
+//		sm.m = make(map[string]HandlerFunc)
+//	}
+//	sm.m[pattern] = handler.ServeHttp
+//}
+//
+//func (sm *ServeMux) ServeHttp(w ResponseWriter, r *Request) {
+//	// 查看路由表项是否存在对应entry
+//	handler, ok := sm.m[r.URL.Path]
+//	if !ok {
+//		if len(r.URL.Path) > 1 && r.URL.Path[len(r.URL.Path)-1] == '/' {
+//			handler, ok = sm.m[r.URL.Path[:len(r.URL.Path)-1]]
+//		}
+//		if !ok {
+//			w.WriteHeader(StatusNotFound)
+//			return
+//		}
+//	}
+//	handler(w, r)
+//}
 
 // 对应的一个服务 监听一个地址（Addr） 对应的回调函数（Handler）
 type Server struct {
@@ -56,6 +112,7 @@ type Server struct {
 
 // 监听地址函数
 func (s *Server) ListenAndServer() error {
+	log.Println("start server success ...")
 	// tcp监听
 	listen, err := net.Listen("tcp", s.Addr)
 
